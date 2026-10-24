@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Puzzle #20 — Supabase Auth Signup/Login</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #272b35;
+    --text: #e6e8ec;
+    --muted: #9aa1ad;
+    --accent: #3ecf8e;
+    --error: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); font-size: 13px; margin: 0 0 24px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tab {
+    flex: 1;
+    padding: 8px;
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .tab.active { border-color: var(--accent); color: var(--accent); }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #0b0d11;
+    color: var(--text);
+    font-size: 14px;
+  }
+  button.primary {
+    width: 100%;
+    margin-top: 20px;
+    padding: 11px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #04140c;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .msg { margin-top: 14px; font-size: 13px; line-height: 1.5; padding: 10px 12px; border-radius: 8px; display: none; }
+  .msg.show { display: block; }
+  .msg.error { background: rgba(255,107,107,0.12); color: var(--error); border: 1px solid rgba(255,107,107,0.3); }
+  .msg.ok { background: rgba(62,207,142,0.12); color: var(--accent); border: 1px solid rgba(62,207,142,0.3); }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .logged-in { text-align: center; }
+  .logged-in .avatar {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--accent); color: #04140c; font-weight: 700; font-size: 22px;
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;
+  }
+  .logged-in pre {
+    text-align: left; background: #0b0d11; border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; font-size: 11px; color: var(--muted);
+    overflow-x: auto; margin-top: 16px;
+  }
+  button.logout {
+    margin-top: 16px; background: transparent; border: 1px solid var(--border);
+    color: var(--text); padding: 9px; border-radius: 8px; cursor: pointer; width: 100%;
+  }
+  footer { text-align: center; margin-top: 18px; font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div id="authPanel" class="panel active">
+    <h1>Puzzle #20</h1>
+    <p class="sub">Supabase Auth: signup + email-confirmed login</p>
+
+    <div class="tabs">
+      <div class="tab active" id="tabLogin">Log in</div>
+      <div class="tab" id="tabSignup">Sign up</div>
+    </div>
+
+    <form id="authForm">
+      <label for="email">Email</label>
+      <input id="email" type="email" required autocomplete="email" placeholder="you@example.com">
+      <label for="password">Password</label>
+      <input id="password" type="password" required autocomplete="current-password" minlength="6" placeholder="At least 6 characters">
+      <button class="primary" id="submitBtn" type="submit">Log in</button>
+    </form>
+
+    <div class="msg" id="msgBox"></div>
+  </div>
+
+  <div id="loggedInPanel" class="panel">
+    <div class="logged-in">
+      <div class="avatar" id="avatarLetter">?</div>
+      <div id="welcomeText">Logged in</div>
+      <pre id="sessionDump"></pre>
+      <button class="logout" id="logoutBtn">Log out</button>
+    </div>
+  </div>
+
+  <footer>Puzzle #20 — real Supabase Auth, email confirmation enforced</footer>
+</div>
+
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  // Dedicated Supabase project reused for this puzzle series (free-tier 2-active-project
+  // cap was hit when creating a brand new project; see CAPABILITY_LOG.md puzzle #20 entry).
+  const SUPABASE_URL = 'https://qqncjqapqaubbbnkzhjb.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_rjOVKDZfooglI61r2pZB8A_e8f7q44L';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+  const tabLogin = document.getElementById('tabLogin');
+  const tabSignup = document.getElementById('tabSignup');
+  const authForm = document.getElementById('authForm');
+  const submitBtn = document.getElementById('submitBtn');
+  const msgBox = document.getElementById('msgBox');
+  const authPanel = document.getElementById('authPanel');
+  const loggedInPanel = document.getElementById('loggedInPanel');
+  const avatarLetter = document.getElementById('avatarLetter');
+  const welcomeText = document.getElementById('welcomeText');
+  const sessionDump = document.getElementById('sessionDump');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  let mode = 'login'; // 'login' | 'signup'
+
+  function setMode(next) {
+    mode = next;
+    tabLogin.classList.toggle('active', mode === 'login');
+    tabSignup.classList.toggle('active', mode === 'signup');
+    submitBtn.textContent = mode === 'login' ? 'Log in' : 'Sign up';
+    hideMsg();
+  }
+  tabLogin.addEventListener('click', () => setMode('login'));
+  tabSignup.addEventListener('click', () => setMode('signup'));
+
+  function showMsg(text, type) {
+    msgBox.textContent = text;
+    msgBox.className = 'msg show ' + type;
+  }
+  function hideMsg() {
+    msgBox.className = 'msg';
+  }
+
+  function showLoggedIn(user) {
+    authPanel.classList.remove('active');
+    loggedInPanel.classList.add('active');
+    avatarLetter.textContent = (user.email || '?').charAt(0).toUpperCase();
+    welcomeText.textContent = 'Logged in as ' + user.email;
+    sessionDump.textContent = JSON.stringify({
+      id: user.id,
+      email: user.email,
+      email_confirmed_at: user.email_confirmed_at,
+      created_at: user.created_at
+    }, null, 2);
+  }
+  function showAuthForm() {
+    loggedInPanel.classList.remove('active');
+    authPanel.classList.add('active');
+  }
+
+  authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    hideMsg();
+    submitBtn.disabled = true;
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+
+    try {
+      if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin }
+        });
+        if (error) throw error;
+        if (data.user && !data.session) {
+          showMsg('Account created. Check your inbox and click the confirmation link before logging in.', 'ok');
+        } else if (data.session) {
+          showLoggedIn(data.session.user);
+        }
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        showLoggedIn(data.user);
+      }
+    } catch (err) {
+      showMsg(err.message || String(err), 'error');
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  logoutBtn.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    showAuthForm();
+    setMode('login');
+  });
+
+  // If the page was opened from a confirmation-link redirect, Supabase sets
+  // a session automatically (detectSessionInUrl default). Reflect it.
+  supabase.auth.getSession().then(({ data }) => {
+    if (data.session) showLoggedIn(data.session.user);
+  });
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (session) showLoggedIn(session.user);
+  });
+</script>
+</body>
+</html>
